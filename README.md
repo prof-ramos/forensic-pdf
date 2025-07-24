@@ -10,11 +10,33 @@ Este projeto é uma ferramenta de linha de comando para realizar uma análise fo
   - `pdftk`
   - `pdfinfo` (parte do pacote `poppler`)
 
-### Instalação (macOS com Homebrew)
+### Instalação
+
+#### macOS (com Homebrew)
 
 ```bash
 brew install exiftool poppler pdftk-java
 ```
+
+#### Linux (Debian/Ubuntu)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libimage-exiftool-perl poppler-utils pdftk-java
+```
+
+#### Windows (com Chocolatey)
+
+Para instalar no Windows, o uso do gerenciador de pacotes [Chocolatey](https://chocolatey.org/install) é recomendado.
+
+```powershell
+choco install exiftool poppler pdftk-java
+```
+
+Como alternativa, você pode baixar os instaladores diretamente dos sites oficiais:
+- **ExifTool:** [Página de instalação do ExifTool](https://exiftool.org/install.html)
+- **Poppler:** O Poppler para Windows pode ser um pouco mais complexo. Usuários recomendam [esta compilação](https://github.com/oschwartz10612/poppler-windows/releases/). Lembre-se de adicionar o diretório `bin` ao seu `PATH`.
+- **PDFtk:** [Página oficial do PDFtk Server](https://www.pdflabs.com/tools/pdftk-server/)
 
 ## Uso
 
