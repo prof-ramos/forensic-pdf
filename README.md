@@ -5,38 +5,39 @@ Este projeto é uma ferramenta de linha de comando para realizar uma análise fo
 ## Requisitos
 
 - Python 3.x
-- As seguintes ferramentas de linha de comando devem estar instaladas e acessíveis no `PATH` do sistema:
-  - `exiftool`
-  - `pdftk`
-  - `pdfinfo` (parte do pacote `poppler`)
+- A biblioteca `pypdf` (instalada via pip).
+- A ferramenta de linha de comando `exiftool`.
 
-### Instalação
+## Instalação
 
-#### macOS (com Homebrew)
+1.  **Instale as dependências do Python:**
 
-```bash
-brew install exiftool poppler pdftk-java
-```
+    Clone o repositório e instale a biblioteca `pypdf` usando o `requirements.txt`.
+    ```bash
+    git clone https://github.com/prof-ramos/forensic-pdf.git
+    cd forensic-pdf
+    pip install -r requirements.txt
+    ```
 
-#### Linux (Debian/Ubuntu)
+2.  **Instale o ExifTool:**
 
-```bash
-sudo apt-get update
-sudo apt-get install -y libimage-exiftool-perl poppler-utils pdftk-java
-```
+    A única dependência externa agora é o `ExifTool`.
 
-#### Windows (com Chocolatey)
+    -   **macOS (com Homebrew):**
+        ```bash
+        brew install exiftool
+        ```
 
-Para instalar no Windows, o uso do gerenciador de pacotes [Chocolatey](https://chocolatey.org/install) é recomendado.
+    -   **Linux (Debian/Ubuntu):**
+        ```bash
+        sudo apt-get update
+        sudo apt-get install -y libimage-exiftool-perl
+        ```
 
-```powershell
-choco install exiftool poppler pdftk-java
-```
-
-Como alternativa, você pode baixar os instaladores diretamente dos sites oficiais:
-- **ExifTool:** [Página de instalação do ExifTool](https://exiftool.org/install.html)
-- **Poppler:** O Poppler para Windows pode ser um pouco mais complexo. Usuários recomendam [esta compilação](https://github.com/oschwartz10612/poppler-windows/releases/). Lembre-se de adicionar o diretório `bin` ao seu `PATH`.
-- **PDFtk:** [Página oficial do PDFtk Server](https://www.pdflabs.com/tools/pdftk-server/)
+    -   **Windows (com Chocolatey):**
+        ```powershell
+        choco install exiftool
+        ```
 
 ## Uso
 
@@ -48,15 +49,9 @@ python3 forensic_analyzer.py /caminho/para/seu/arquivo.pdf
 
 Por padrão, o relatório será salvo como `<nome_do_arquivo>.report.json` no mesmo diretório do arquivo original.
 
-Você pode especificar um local de saída diferente com a flag `-o` ou `--output`:
-
-```bash
-python3 forensic_analyzer.py meu_doc.pdf -o /caminho/para/relatorio.json
-```
-
 ## Fluxo de Trabalho da Análise
 
-O script segue um fluxo de trabalho claro para garantir uma análise consistente e completa. O diagrama abaixo ilustra as etapas principais, desde a validação inicial do arquivo até a geração do relatório final.
+O fluxo de trabalho foi simplificado para reduzir as dependências externas. O `pypdf` agora lida com a maior parte da análise interna do PDF, enquanto o `exiftool` ainda é usado por sua capacidade inigualável de extrair metadados detalhados.
 
 ```mermaid
 graph TD
@@ -64,31 +59,23 @@ graph TD
     B --> |Arquivo Válido| C{Calcula Hash SHA-256};
     B --> |Arquivo Inválido| Z[Encerra com Erro];
     
-    C --> D[Executa Ferramentas Externas];
-    D --> E[exiftool -j <arquivo>];
-    D --> F[pdftk <arquivo> dump_data];
-    D --> G[pdfinfo <arquivo>];
+    C --> D{Extração de Dados};
+    D --> E[Executa exiftool];
+    D --> F[Executa pypdf (na memória)];
     
     subgraph "Análise dos Dados"
-        E --> H[Parse Metadados EXIF];
-        F --> I[Parse Metadados PDFTk];
-        G --> J[Parse Metadados Poppler];
-        
-        H --> K{Analisa Datas de Modificação};
-        I --> L{Verifica Assinaturas Digitais};
-        J --> M{Verifica Versão do PDF};
-        J --> N{Verifica Vulnerabilidades (JS)};
+        E --> G[Parse Metadados EXIF];
+        F --> H[Parse Metadados, Assinaturas, etc.];
+        G --> I{Analisa Datas de Modificação};
     end
     
     subgraph "Geração do Relatório"
-        C --> O[Integridade do Arquivo];
-        K --> P[Análise de Modificação];
-        L --> Q[Assinaturas];
-        M --> R[Info Estrutural];
-        N --> S[Vulnerabilidades];
+        C --> J[Integridade do Arquivo];
+        I --> K[Análise de Modificação];
+        H --> L[Dados Estruturais e de Segurança];
     end
 
-    O & P & Q & R & S --> T{Compila Relatório JSON};
-    T --> U[Salva report.json];
-    U --> V[Fim];
+    J & K & L --> M{Compila Relatório JSON};
+    M --> N[Salva report.json];
+    N --> O[Fim];
 ```

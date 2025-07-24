@@ -2,17 +2,14 @@
 Analisador Forense de PDF.
 
 Este script é uma ferramenta de linha de comando para realizar uma análise forense
-em arquivos PDF. Ele extrai metadados, verifica a integridade do arquivo, analisa
-datas de modificação e verifica a presença de assinaturas digitais e
-vulnerabilidades potenciais.
+em arquivos PDF. Ele extrai metadados, verifica a integridade do arquivo e analisa
+datas de modificação.
 
-Requer as seguintes dependências de linha de comando:
-- exiftool
-- pdftk
-- pdfinfo (parte do pacote poppler)
+Requer a dependência de linha de comando `exiftool` e a biblioteca Python `pypdf`.
 
 Uso:
-    python forensic_analyzer.py /caminho/para/seu/arquivo.pdf [--output /caminho/para/relatorio.json]
+    pip install -r requirements.txt
+    python3 forensic_analyzer.py /caminho/para/seu/arquivo.pdf
 """
 import argparse
 import json
@@ -21,10 +18,13 @@ import os
 import subprocess
 import hashlib
 import shutil
-from datetime import datetime
-from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
+from typing import List, Dict, Any
 
-# Configuração do logger para fornecer feedback claro ao usuário.
+# Importa a nova dependência
+import pypdf
+
+# Configuração do logger
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -34,31 +34,16 @@ class ToolExecutionError(Exception):
 
 def check_dependencies():
     """
-    Verifica se todas as ferramentas de linha de comando necessárias estão instaladas.
-    
-    Levanta:
-        SystemExit: Se uma dependência estiver faltando.
+    Verifica se a ferramenta de linha de comando `exiftool` está instalada.
     """
-    dependencies = ['exiftool', 'pdftk', 'pdfinfo']
-    missing = [dep for dep in dependencies if not shutil.which(dep)]
-    if missing:
-        logger.error(f"Dependências faltando: {', '.join(missing)}. Por favor, instale-as e tente novamente.")
+    if not shutil.which('exiftool'):
+        logger.error("Dependência faltando: exiftool. Por favor, instale-a e tente novamente.")
         raise SystemExit(1)
-    logger.info("Todas as dependências foram encontradas.")
+    logger.info("Dependência externa (exiftool) encontrada.")
 
 def validate_file_path(file_path: str) -> str:
     """
     Valida o caminho do arquivo fornecido.
-
-    Args:
-        file_path: O caminho para o arquivo PDF.
-
-    Returns:
-        O caminho do arquivo validado.
-
-    Raises:
-        FileNotFoundError: Se o arquivo não for encontrado.
-        ValueError: Se o arquivo não for um PDF.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
@@ -69,16 +54,9 @@ def validate_file_path(file_path: str) -> str:
 def compute_hash(file_path: str) -> str:
     """
     Calcula o hash SHA-256 de um arquivo.
-
-    Args:
-        file_path: O caminho para o arquivo.
-
-    Returns:
-        O hash SHA-256 em formato hexadecimal.
     """
     sha256 = hashlib.sha256()
     with open(file_path, 'rb') as f:
-        # Lê o arquivo em blocos para ser eficiente em termos de memória.
         for chunk in iter(lambda: f.read(4096), b""):
             sha256.update(chunk)
     return sha256.hexdigest()
@@ -86,53 +64,67 @@ def compute_hash(file_path: str) -> str:
 def run_command(cmd: List[str]) -> str:
     """
     Executa um comando de shell e retorna sua saída.
-
-    Args:
-        cmd: O comando e seus argumentos como uma lista de strings.
-
-    Returns:
-        A saída padrão (stdout) do comando.
-
-    Raises:
-        ToolExecutionError: Se o comando falhar.
     """
     try:
-        # O uso de `check=True` garante que uma exceção seja levantada se o comando retornar um código de erro.
         result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8')
         return result.stdout.strip()
     except FileNotFoundError:
-        logger.error(f"Comando não encontrado: {cmd[0]}. Verifique se está instalado e no PATH.")
         raise ToolExecutionError(f"Ferramenta não encontrada: {cmd[0]}")
     except subprocess.CalledProcessError as e:
-        logger.error(f"Erro ao executar '{' '.join(cmd)}': {e.stderr.strip()}")
-        raise ToolExecutionError(f"Falha na execução de: {' '.join(cmd)}")
+        raise ToolExecutionError(f"Falha na execução de: {' '.join(cmd)} - {e.stderr.strip()}")
 
-def _parse_key_value_output(output: str) -> Dict[str, str]:
+def extract_data_pypdf(file_path: str) -> Dict[str, Any]:
     """
-    Função auxiliar para parsear saídas no formato 'Chave: Valor'.
+    Extrai metadados, informações estruturais e de segurança usando pypdf.
 
     Args:
-        output: A string de saída de uma ferramenta como pdftk ou pdfinfo.
+        file_path: O caminho para o arquivo PDF.
 
     Returns:
-        Um dicionário com os pares chave-valor extraídos.
+        Um dicionário contendo os dados extraídos.
     """
-    metadata = {}
-    for line in output.splitlines():
-        if ':' in line:
-            key, value = line.split(':', 1)
-            metadata[key.strip()] = value.strip()
-    return metadata
+    try:
+        with open(file_path, "rb") as f:
+            reader = pypdf.PdfReader(f)
+            metadata = reader.metadata
+            
+            # Converte o objeto de metadados para um dicionário simples
+            pypdf_meta = {
+                "Author": metadata.author,
+                "Creator": metadata.creator,
+                "Producer": metadata.producer,
+                "Subject": metadata.subject,
+                "Title": metadata.title,
+                "CreationDate": metadata.creation_date,
+                "ModificationDate": metadata.modification_date,
+            }
+
+            # Remove chaves com valores None para um relatório mais limpo
+            pypdf_meta = {k: v for k, v in pypdf_meta.items() if v is not None}
+
+            return {
+                "metadata": pypdf_meta,
+                "structural_info": {
+                    "pdf_version": f"{reader.pdf_header}",
+                    "pages": len(reader.pages),
+                    "encrypted": reader.is_encrypted,
+                },
+                "security_info": {
+                    # Verifica a presença de assinaturas digitais
+                    "has_digital_signatures": "/Sig" in reader.trailer.keys(),
+                    # Verifica a presença de JavaScript
+                    "contains_javascript": reader.get_fields() is not None and any(
+                        field.get("/AA", {}).get("/JS") for field in reader.get_fields().values()
+                    )
+                }
+            }
+    except pypdf.errors.PdfReadError as e:
+        logger.error(f"Erro ao ler o PDF com pypdf: {e}")
+        return {}
 
 def analyze_modifications(metadata_exif: Dict[str, Any]) -> Dict[str, Any]:
     """
     Analisa as datas de criação e modificação para detectar alterações.
-
-    Args:
-        metadata_exif: Dicionário de metadados extraído pelo ExifTool.
-
-    Returns:
-        Um dicionário contendo o status da alteração e as datas.
     """
     creation = metadata_exif.get('CreateDate')
     modified = metadata_exif.get('ModifyDate')
@@ -145,42 +137,24 @@ def analyze_modifications(metadata_exif: Dict[str, Any]) -> Dict[str, Any]:
 def generate_report(file_path: str, output_path: str):
     """
     Orquestra a análise forense e gera o relatório JSON final.
-
-    Args:
-        file_path: O caminho para o arquivo PDF a ser analisado.
-        output_path: O caminho para salvar o relatório JSON.
     """
     try:
-        # --- 1. Validação e Coleta Inicial ---
         validated_path = validate_file_path(file_path)
         integrity_hash = compute_hash(validated_path)
         logger.info(f"Hash SHA-256 calculado para '{os.path.basename(validated_path)}'.")
 
-        # --- 2. Execução das Ferramentas Externas (uma vez por ferramenta) ---
-        logger.info("Extraindo metadados com as ferramentas externas...")
-        exif_output = run_command(['exiftool', '-j', validated_path])
-        pdftk_output = run_command(['pdftk', validated_path, 'dump_data'])
-        pdfinfo_output = run_command(['pdfinfo', validated_path])
-        logger.info("Extração de metadados concluída.")
-
-        # --- 3. Parsing e Análise dos Resultados ---
+        # 1. Extração com ExifTool (ainda valioso por sua abrangência)
+        logger.info("Extraindo metadados com ExifTool...")
+        exif_output = run_command(['exiftool', '-j', '-d', '%Y-%m-%dT%H:%M:%S%z', validated_path])
         metadata_exif = json.loads(exif_output)[0] if exif_output else {}
-        metadata_pdftk = _parse_key_value_output(pdftk_output)
-        metadata_poppler = _parse_key_value_output(pdfinfo_output)
 
+        # 2. Extração com pypdf
+        logger.info("Extraindo dados com pypdf...")
+        pypdf_data = extract_data_pypdf(validated_path)
+
+        # 3. Análise e Compilação
         modifications = analyze_modifications(metadata_exif)
         
-        # A verificação de assinatura agora reutiliza a saída do pdftk.
-        has_signatures = 'Signature' in pdftk_output
-        
-        # A verificação estrutural reutiliza a saída do pdfinfo.
-        pdf_version = metadata_poppler.get('PDF version')
-        
-        # A verificação de vulnerabilidade é mais específica e reutiliza a saída do pdfinfo.
-        # Procura por tags que indicam conteúdo ativo ou ações de lançamento.
-        has_js = 'JavaScript' in pdfinfo_output or '/JS' in pdfinfo_output or '/Launch' in pdfinfo_output
-        
-        # --- 4. Compilação do Relatório Final ---
         report = {
             'file_information': {
                 'file_name': os.path.basename(validated_path),
@@ -189,54 +163,49 @@ def generate_report(file_path: str, output_path: str):
             },
             'metadata': {
                 'exiftool': metadata_exif,
-                'pdftk': metadata_pdftk,
-                'poppler': metadata_poppler
+                'pypdf': pypdf_data.get('metadata', {}),
             },
             'analysis_summary': {
                 'modification_analysis': modifications,
-                'has_digital_signatures': has_signatures,
-                'structural_info': {'pdf_version': pdf_version},
-                'potential_vulnerabilities': {'contains_active_content': has_js}
+                'has_digital_signatures': pypdf_data.get('security_info', {}).get('has_digital_signatures', False),
+                'structural_info': pypdf_data.get('structural_info', {}),
+                'potential_vulnerabilities': {
+                    'contains_javascript': pypdf_data.get('security_info', {}).get('contains_javascript', False)
+                }
             },
             'audit_trail': {
-                'analysis_date_utc': datetime.utcnow().isoformat()
+                'analysis_date_utc': datetime.now(timezone.utc).isoformat()
             }
         }
         
-        # --- 5. Salvando o Relatório ---
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=4, ensure_ascii=False)
         
         logger.info(f"Relatório forense gerado com sucesso: {output_path}")
 
-    except (FileNotFoundError, ValueError, ToolExecutionError, SystemExit) as e:
-        # Captura exceções esperadas e registra o erro sem gerar um relatório parcial.
+    except (FileNotFoundError, ValueError, ToolExecutionError, SystemExit, json.JSONDecodeError) as e:
         logger.error(f"Falha na análise: {e}")
     except Exception as e:
-        # Captura qualquer outra exceção inesperada.
         logger.error(f"Ocorreu um erro inesperado: {e}", exc_info=True)
 
 def main():
     """
     Ponto de entrada principal para o script.
-    Parseia argumentos da linha de comando e inicia a geração do relatório.
     """
-    # Verifica as dependências antes de fazer qualquer outra coisa.
     check_dependencies()
 
     parser = argparse.ArgumentParser(
         description="Análise Forense de PDF",
-        epilog="Exemplo: python forensic_analyzer.py meu_doc.pdf -o relatorio_doc.json"
+        epilog="Exemplo: python3 forensic_analyzer.py meu_doc.pdf"
     )
     parser.add_argument('file_path', type=str, help="Caminho do arquivo PDF a ser analisado.")
     parser.add_argument(
         '-o', '--output',
         type=str,
-        help="Caminho do arquivo de relatório JSON de saída. Padrão: <arquivo_original>.report.json"
+        help="Caminho do arquivo de relatório JSON. Padrão: <arquivo_original>.report.json"
     )
     args = parser.parse_args()
     
-    # Define o nome do arquivo de saída padrão se não for fornecido.
     output_file = args.output or f"{os.path.splitext(args.file_path)[0]}.report.json"
     
     generate_report(args.file_path, output_file)
